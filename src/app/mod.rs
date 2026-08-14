@@ -1181,6 +1181,8 @@ pub struct App {
     /// new/right). Drives the `▶` caret placement and the side a new line
     /// comment attaches to. Ignored in unified view. Defaults to `New`.
     pub cursor_side: LineSide,
+    /// Whether file-list rows show per-file added and removed line counts.
+    pub show_file_line_stats: bool,
 
     pub file_list_state: FileListState,
     pub comment_navigator_state: CommentNavigatorState,
