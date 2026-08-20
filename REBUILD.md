@@ -7,6 +7,17 @@ It is upstream `main` plus:
 - **agavra/tuicr#607** (antonio2368) – per-file `+added -removed` counts in the file tree
 - our fixes on top of #607 – no counts in pristine (`--all-files`) mode, none on a pure rename
 - **agavra/tuicr#633** (ours) – `<leader>L` / `<leader>H` move the file list boundary, repeating on a bare `L` / `H`
+- our fix – no line stats in `--file` mode either, not just `--all-files` (both render whole files)
+
+## Clone on a new device
+
+`local/daily` is pushed, so a fresh machine does not need to redo the merge:
+
+```bash
+git clone -b local/daily https://github.com/ac8318740/tuicr.git ~/tuicr
+cd ~/tuicr && cargo build --release
+cp target/release/tuicr ~/.local/bin/tuicr
+```
 
 ## Rebuild
 

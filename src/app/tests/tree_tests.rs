@@ -294,3 +294,32 @@ fn test_interleaved_paths_stay_under_own_directory() {
         ]
     );
 }
+
+/// `--all-files` and `--file` both render whole files, where every line is an
+/// addition, so `+N -0` on every row is noise rather than information. The
+/// two modes reach that state by different routes: `--all-files` sets
+/// `is_pristine_mode`, while `--file` leaves it false and sets
+/// `vcs_type == VcsType::File`. Suppressing on the first alone left the
+/// counts visible in `--file`.
+#[test]
+fn should_treat_pristine_mode_as_a_whole_file_view() {
+    let mut app = app_with(&["a.rs"]);
+    app.is_pristine_mode = true;
+
+    assert!(app.is_whole_file_view());
+}
+
+#[test]
+fn should_treat_file_backed_vcs_as_a_whole_file_view() {
+    let mut app = app_with(&["a.rs"]);
+    app.vcs_info.vcs_type = VcsType::File;
+
+    assert!(app.is_whole_file_view());
+}
+
+#[test]
+fn should_not_treat_a_normal_diff_as_a_whole_file_view() {
+    let app = app_with(&["a.rs"]);
+
+    assert!(!app.is_whole_file_view());
+}

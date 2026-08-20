@@ -70,7 +70,7 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
                 depth * 2
                     + 4
                     + filename.width()
-                    + file_stat_width(file, app.show_file_line_stats && !app.is_pristine_mode)
+                    + file_stat_width(file, app.show_file_line_stats && !app.is_whole_file_view())
             }
         })
         .max()
@@ -171,7 +171,7 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
                         spans.extend(file_stat_spans(
                             file,
                             &app.theme,
-                            app.show_file_line_stats && !app.is_pristine_mode,
+                            app.show_file_line_stats && !app.is_whole_file_view(),
                         ));
                         Line::from(spans)
                     }

@@ -69,6 +69,17 @@ impl App {
         (idx < total).then_some(idx)
     }
 
+    /// `true` when the view shows whole files rather than a diff: both
+    /// `--all-files` (pristine) and `--file <path>` synthesize every line as
+    /// an addition, so per-file `+added -removed` counts carry no
+    /// information and only add noise to the tree.
+    ///
+    /// Distinct from `is_pristine_mode`, which is `--all-files` alone and
+    /// drives the status-bar chip.
+    pub fn is_whole_file_view(&self) -> bool {
+        self.is_pristine_mode || self.vcs_info.vcs_type == VcsType::File
+    }
+
     pub fn toggle_diff_view_mode(&mut self) {
         if self.is_pristine_mode {
             // Side-by-side has nothing to show in pristine mode: there is no
