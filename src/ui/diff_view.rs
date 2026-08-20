@@ -238,6 +238,12 @@ pub(super) fn truncate_path_smart(path: &str, max_width: usize) -> String {
 /// Build a right-aligned title showing diff stats for the current scope.
 /// In overview: total stats across all files. In a file: that file's stats.
 pub(super) fn diff_stat_title(app: &App) -> Line<'static> {
+    // Whole-file views count every line as an addition, so the pane header
+    // would read a meaningless "+38145 -0". Same reason the file tree drops
+    // its per-file counts there.
+    if app.is_whole_file_view() {
+        return Line::from("");
+    }
     let (additions, deletions) = if app.is_cursor_in_overview() || app.current_file_path().is_none()
     {
         let (_, a, d) = app.diff_stat();
