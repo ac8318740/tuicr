@@ -146,7 +146,7 @@ fn editor_target_uses_selected_file_list_row() {
     app.focused_panel = FocusedPanel::FileList;
     app.queue_editor_for_focused_item();
 
-    let target = app.take_pending_editor_target().expect("editor target");
+    let (target, _) = app.take_pending_editor_target().expect("editor target");
     assert_eq!(target.path, path);
     assert_eq!(target.line, None);
 }
@@ -167,7 +167,7 @@ fn edit_command_uses_selected_file_list_row() {
 
     crate::handler::handle_command_action(&mut app, crate::input::Action::SubmitInput);
 
-    let target = app.take_pending_editor_target().expect("editor target");
+    let (target, _) = app.take_pending_editor_target().expect("editor target");
     assert_eq!(target.path, path);
     assert_eq!(target.line, None);
     assert_eq!(app.input_mode, InputMode::Normal);
@@ -199,7 +199,7 @@ fn editor_target_uses_diff_cursor_line() {
         .expect("diff line annotation");
     app.queue_editor_for_focused_item();
 
-    let target = app.take_pending_editor_target().expect("editor target");
+    let (target, _) = app.take_pending_editor_target().expect("editor target");
     assert_eq!(target.path, path);
     assert_eq!(target.line, Some(2));
 }
@@ -303,7 +303,7 @@ fn editor_target_falls_back_to_forge_backend_checkout_in_pr_mode() {
 
     app.queue_editor_for_focused_item();
 
-    let target = app.take_pending_editor_target().expect("editor target");
+    let (target, _) = app.take_pending_editor_target().expect("editor target");
     assert_eq!(target.path, path);
 }
 
@@ -562,4 +562,109 @@ fn reviewed_banner_keeps_annotations_aligned_with_rendered_rows() {
         app.line_annotations.get(app.diff_state.cursor_line),
         Some(AnnotatedLine::HunkHeader { .. })
     ));
+}
+
+/// A file a PR adds does not exist in the local checkout — the checkout is
+/// sitting on some other commit — so resolving it to a worktree path always
+/// misses. But an added file's diff *is* the whole file: every line is an
+/// addition, so the content is already in hand and needs no network call.
+///
+/// The viewer reconstructs it. The editor deliberately does not: handing
+/// someone a throwaway copy to type into would lose their work silently.
+fn added_file(path: &str, lines: &[&str]) -> DiffFile {
+    let hunk_lines: Vec<DiffLine> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, content)| DiffLine {
+            origin: LineOrigin::Addition,
+            content: (*content).to_string(),
+            old_lineno: None,
+            new_lineno: Some(i as u32 + 1),
+            highlighted_spans: None,
+        })
+        .collect();
+    let hunks = vec![DiffHunk {
+        header: format!("@@ -0,0 +1,{} @@", lines.len()),
+        lines: hunk_lines,
+        old_start: 0,
+        old_count: 0,
+        new_start: 1,
+        new_count: lines.len() as u32,
+    }];
+    let content_hash = DiffFile::compute_content_hash(&hunks);
+    DiffFile {
+        old_path: None,
+        new_path: Some(PathBuf::from(path)),
+        status: FileStatus::Added,
+        hunks,
+        is_binary: false,
+        is_too_large: false,
+        is_commit_message: false,
+        content_hash,
+    }
+}
+
+/// Returns the checkout directory alongside the app: dropping it would
+/// delete the directory the app is still pointed at.
+fn pr_app_missing_file(file: DiffFile) -> (App, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut app = app_with_root(PathBuf::from("forge:github.com/agavra/tuicr"), vec![file]);
+    // An empty checkout: the path resolves, the file is simply not there.
+    app.forge_backend = Some(Box::new(FakeForgeBackend {
+        local_checkout: Some(dir.path().to_path_buf()),
+    }));
+    (app, dir)
+}
+
+#[test]
+fn viewer_reconstructs_an_added_pr_file_missing_from_the_checkout() {
+    let (mut app, _checkout) =
+        pr_app_missing_file(added_file("src/new.rs", &["fn main() {}", "// tail"]));
+    app.focused_panel = FocusedPanel::Diff;
+    app.file_viewer = "spechub-view".into();
+
+    app.queue_viewer_for_focused_item();
+
+    let (target, command) = app
+        .take_pending_editor_target()
+        .expect("an added file must still be viewable");
+    assert_eq!(command.as_deref(), Some("spechub-view"));
+    assert_eq!(
+        fs::read_to_string(&target.path).expect("reconstructed file"),
+        "fn main() {}\n// tail\n"
+    );
+    assert_eq!(
+        target.path.extension().and_then(|e| e.to_str()),
+        Some("rs"),
+        "the extension has to survive, or the viewer cannot pick a highlighter"
+    );
+}
+
+#[test]
+fn editor_does_not_reconstruct_an_added_pr_file() {
+    let (mut app, _checkout) = pr_app_missing_file(added_file("src/new.rs", &["fn main() {}"]));
+    app.focused_panel = FocusedPanel::Diff;
+
+    app.queue_editor_for_focused_item();
+
+    assert!(
+        app.take_pending_editor_target().is_none(),
+        "editing a throwaway copy would silently discard the edit"
+    );
+}
+
+/// Only an added file's diff is the whole file. A modified one is hunks and
+/// context, so reconstructing it would present a partial file as the file.
+#[test]
+fn viewer_does_not_reconstruct_a_modified_pr_file() {
+    let (mut app, _checkout) = pr_app_missing_file(file("src/edited.rs", vec![hunk(1, 2)]));
+    app.focused_panel = FocusedPanel::Diff;
+    app.file_viewer = "spechub-view".into();
+
+    app.queue_viewer_for_focused_item();
+
+    assert!(
+        app.take_pending_editor_target().is_none(),
+        "a partial reconstruction must not be passed off as the file"
+    );
 }

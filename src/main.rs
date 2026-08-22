@@ -234,6 +234,12 @@ fn main() -> anyhow::Result<()> {
                     app.leader_key = leader;
                 }
                 app.comment_vim_enabled = cfg.comment_vim.unwrap_or(false);
+                if let Some(viewer) = cfg.file_viewer.clone() {
+                    app.file_viewer = viewer;
+                }
+                if cfg.show_pr_info == Some(false) {
+                    app.show_pr_info = false;
+                }
                 if let Some(w) = cfg.comment_tab_width {
                     app.comment_tab_width = w;
                 }
@@ -665,6 +671,23 @@ fn main() -> anyhow::Result<()> {
                                 app.toggle_single_file_view();
                                 continue;
                             }
+                            // `<leader>v` hands the focused file to the
+                            // configured viewer. A leader chord rather than a
+                            // bare key because the file tree already spends
+                            // every plain letter worth having, and the leader
+                            // reaches the same action from either panel.
+                            crossterm::event::KeyCode::Char('v') => {
+                                app.queue_viewer_for_focused_item();
+                                consume_pending_editor(&mut app, &mut terminal);
+                                continue;
+                            }
+                            // `<leader>p` hides the PR overview, so
+                            // `<leader>f` can actually leave one file on
+                            // screen instead of opening on the PR.
+                            crossterm::event::KeyCode::Char('p') => {
+                                app.toggle_pr_info();
+                                continue;
+                            }
                             _ => {}
                         }
                         // Otherwise fall through to normal handling
@@ -780,47 +803,7 @@ fn main() -> anyhow::Result<()> {
                     }
 
                     dispatch_action(&mut app, action);
-                    if let Some(target) = app.take_pending_editor_target() {
-                        match run_editor_from_tui(&mut terminal, &target) {
-                            // The editor is still open, so there is nothing to
-                            // pick up yet; the user reloads once they are done.
-                            Ok(Ok(EditorOutcome::Detached(launch))) => {
-                                app.track_editor_launch(launch);
-                                let hint = if app.diff_source.includes_worktree_changes() {
-                                    " (:e to reload)"
-                                } else {
-                                    ""
-                                };
-                                app.set_message(format!("Opened {}{hint}", target.path.display()));
-                            }
-                            Ok(Ok(EditorOutcome::Finished)) => {
-                                if app.diff_source.includes_worktree_changes() {
-                                    match app.reload_diff_files() {
-                                        Ok((count, invalidated)) => {
-                                            let invalidated_suffix = if invalidated > 0 {
-                                                format!(", {invalidated} changed since last review")
-                                            } else {
-                                                String::new()
-                                            };
-                                            app.set_message(format!(
-                                                "Opened {} and reloaded {count} files{invalidated_suffix}",
-                                                target.path.display()
-                                            ));
-                                        }
-                                        Err(err) => {
-                                            app.set_error(format!(
-                                                "Reload after editor failed: {err}"
-                                            ));
-                                        }
-                                    }
-                                } else {
-                                    app.set_message(format!("Opened {}", target.path.display()));
-                                }
-                            }
-                            Ok(Err(err)) => app.set_error(err.to_string()),
-                            Err(err) => app.set_error(format!("Failed to restore terminal: {err}")),
-                        }
-                    }
+                    consume_pending_editor(&mut app, &mut terminal);
                 }
                 Event::Mouse(mouse_event) => handle_mouse_event(&mut app, mouse_event),
                 Event::Paste(text) => {
@@ -977,11 +960,66 @@ enum EditorOutcome {
     Detached(EditorLaunch),
 }
 
+/// Runs whatever editor or viewer open is queued, if any.
+///
+/// Called from two places on purpose. Leader chords `continue` past the
+/// action dispatcher, so a chord that queues a target — `<leader>v` — would
+/// otherwise leave it sitting there until the next keypress happened to fall
+/// through to the dispatcher, which looked exactly like the viewer hanging.
+fn consume_pending_editor<W: Write>(app: &mut App, terminal: &mut TerminalSession<W>) {
+    if let Some((target, viewer)) = app.take_pending_editor_target() {
+        match run_editor_from_tui(terminal, &target, viewer.as_deref()) {
+            // The editor is still open, so there is nothing to
+            // pick up yet; the user reloads once they are done.
+            Ok(Ok(EditorOutcome::Detached(launch))) => {
+                app.track_editor_launch(launch);
+                let hint = if app.diff_source.includes_worktree_changes() {
+                    " (:e to reload)"
+                } else {
+                    ""
+                };
+                app.set_message(format!("Opened {}{hint}", target.path.display()));
+            }
+            Ok(Ok(EditorOutcome::Finished)) => {
+                if app.diff_source.includes_worktree_changes() {
+                    match app.reload_diff_files() {
+                        Ok((count, invalidated)) => {
+                            let invalidated_suffix = if invalidated > 0 {
+                                format!(", {invalidated} changed since last review")
+                            } else {
+                                String::new()
+                            };
+                            app.set_message(format!(
+                                "Opened {} and reloaded {count} files{invalidated_suffix}",
+                                target.path.display()
+                            ));
+                        }
+                        Err(err) => {
+                            app.set_error(format!("Reload after editor failed: {err}"));
+                        }
+                    }
+                } else {
+                    app.set_message(format!("Opened {}", target.path.display()));
+                }
+            }
+            Ok(Err(err)) => app.set_error(err.to_string()),
+            Err(err) => app.set_error(format!("Failed to restore terminal: {err}")),
+        }
+    }
+}
+
 fn run_editor_from_tui<W: Write>(
     terminal: &mut TerminalSession<W>,
     target: &EditorTarget,
+    viewer: Option<&str>,
 ) -> anyhow::Result<Result<EditorOutcome, EditorError>> {
-    let command = EditorCommand::from_env(target);
+    // A viewer is parsed the same way `$EDITOR` is - shell-like splitting,
+    // run without a shell - so a configured `yazi` and an inherited `nvim`
+    // reach the terminal by the identical path.
+    let command = match viewer {
+        Some(viewer) => EditorCommand::from_editor(viewer, target),
+        None => EditorCommand::from_env(target),
+    };
     // Windowed editors never draw on our terminal, so suspending would only
     // blank the TUI for as long as the editor takes to come up.
     if command.surface() == EditorSurface::Gui {

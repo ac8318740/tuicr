@@ -60,8 +60,12 @@ impl App {
     /// The main event loop consumes this after leaving raw mode and the
     /// alternate screen,
     /// because `App` does not own terminal state.
-    pub fn take_pending_editor_target(&mut self) -> Option<EditorTarget> {
-        self.pending_editor_target.take()
+    /// Returns the target and the command to open it with. `None` for the
+    /// command means `$EDITOR`; `Some` is the configured viewer. Both are
+    /// taken together so neither can outlive the other.
+    pub fn take_pending_editor_target(&mut self) -> Option<(EditorTarget, Option<String>)> {
+        let target = self.pending_editor_target.take()?;
+        Some((target, self.pending_editor_command.take()))
     }
 
     /// Tracks a launched windowed editor so it gets cleaned up once it exits
@@ -98,10 +102,20 @@ impl App {
     /// event loop can perform the terminal handoff.
     /// Invalid focus states are reported through the status bar instead.
     pub fn queue_editor_for_focused_item(&mut self) {
+        self.queue_editor_for_focused_item_inner(false);
+    }
+
+    /// `reconstruct` permits rebuilding a file the checkout does not have
+    /// from its diff. The viewer allows it; the editor does not.
+    fn queue_editor_for_focused_item_inner(&mut self, reconstruct: bool) {
+        // The editor is the default path, so clear anything an earlier viewer
+        // open armed. Without this a viewer open that resolved to nothing
+        // would silently hijack the next `e`.
+        self.pending_editor_command = None;
         match self.focused_panel {
             FocusedPanel::FileList => match self.get_selected_tree_item() {
                 Some(FileTreeItem::File { file_idx, .. }) => {
-                    self.queue_editor_for_file_idx(file_idx, None)
+                    self.queue_editor_for_file_idx(file_idx, None, reconstruct)
                 }
                 Some(FileTreeItem::Directory { .. }) => {
                     self.set_warning("Select a file to open in editor");
@@ -127,7 +141,7 @@ impl App {
                         .and_then(|line| line.new_lineno.or(line.old_lineno)),
                     _ => self.get_line_at_cursor().map(|(line, _side)| line),
                 };
-                self.queue_editor_for_file_idx(file_idx, line);
+                self.queue_editor_for_file_idx(file_idx, line, reconstruct);
             }
             FocusedPanel::Comments | FocusedPanel::CommitSelector => {
                 self.set_warning("Focus a file or diff line to open in editor");
@@ -135,7 +149,20 @@ impl App {
         }
     }
 
-    fn queue_editor_for_file_idx(&mut self, file_idx: usize, line: Option<u32>) {
+    /// Resolves the focused item exactly as `e` does, then arms the
+    /// configured viewer instead of `$EDITOR`.
+    ///
+    /// The viewer is armed only after the target resolves. Arming it first
+    /// would leave it set on every path that warns instead of queueing, and
+    /// the next `e` would run the viewer.
+    pub fn queue_viewer_for_focused_item(&mut self) {
+        self.queue_editor_for_focused_item_inner(true);
+        if self.pending_editor_target.is_some() {
+            self.pending_editor_command = Some(self.file_viewer.clone());
+        }
+    }
+
+    fn queue_editor_for_file_idx(&mut self, file_idx: usize, line: Option<u32>, reconstruct: bool) {
         let Some(file) = self.diff_files.get(file_idx) else {
             self.set_warning("No file selected");
             return;
@@ -164,17 +191,58 @@ impl App {
         };
 
         let path = root.join(&display_path);
-        // Deleted files and remote-only PR files have diff rows,
-        // but no worktree file the external editor can open.
-        if !path.exists() {
+        if path.exists() {
+            self.pending_editor_target = Some(EditorTarget { path, line });
+            return;
+        }
+
+        // Deleted files and remote-only PR files have diff rows but no
+        // worktree file. A file the PR *adds* is the common case here: the
+        // checkout is sitting on some other commit, so the path never
+        // resolves however healthy everything else is.
+        //
+        // Its diff is the whole file though — every line is an addition — so
+        // the content is already in hand and needs no network call. Write it
+        // out and view that instead.
+        let rebuilt = if reconstruct {
+            whole_file_from_diff(file)
+        } else {
+            None
+        };
+        let Some(rebuilt) = rebuilt else {
             self.set_warning(format!(
                 "Cannot open {}: file does not exist",
                 path.display()
             ));
             return;
+        };
+        match self.write_reconstructed_file(&display_path, &rebuilt) {
+            Ok(path) => self.pending_editor_target = Some(EditorTarget { path, line }),
+            Err(err) => self.set_error(format!("Cannot rebuild {}: {err}", display_path.display())),
         }
+    }
 
-        self.pending_editor_target = Some(EditorTarget { path, line });
+    /// Writes reconstructed content into the session scratch directory,
+    /// keeping the file's own relative path so both the name and the
+    /// extension survive — a viewer picks its highlighter off the extension.
+    fn write_reconstructed_file(
+        &mut self,
+        display_path: &Path,
+        content: &str,
+    ) -> std::io::Result<PathBuf> {
+        let dir = match self.reconstructed_files.as_ref() {
+            Some(dir) => dir,
+            None => {
+                self.reconstructed_files = Some(tempfile::tempdir()?);
+                self.reconstructed_files.as_ref().expect("just assigned")
+            }
+        };
+        let path = dir.path().join(display_path);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, content)?;
+        Ok(path)
     }
 
     pub fn toggle_reviewed(&mut self) {
@@ -442,4 +510,36 @@ impl App {
     pub fn is_cursor_in_overview(&self) -> bool {
         self.diff_state.cursor_line < self.review_comments_render_height()
     }
+}
+
+/// The complete post-image of a file, when the diff happens to hold it.
+///
+/// Only an added file qualifies. Its diff is one hunk starting at line 1 in
+/// which every line is an addition, so concatenating them reproduces the file
+/// exactly. A modified file's diff is hunks and context with the untouched
+/// remainder missing, and presenting that as the file would be a lie, so this
+/// returns `None` for anything else rather than guessing.
+fn whole_file_from_diff(file: &DiffFile) -> Option<String> {
+    if file.status != FileStatus::Added || file.is_binary || file.is_too_large {
+        return None;
+    }
+    let [hunk] = file.hunks.as_slice() else {
+        return None;
+    };
+    if hunk.new_start != 1 {
+        return None;
+    }
+    if !hunk
+        .lines
+        .iter()
+        .all(|line| line.origin == LineOrigin::Addition)
+    {
+        return None;
+    }
+    let mut out = String::new();
+    for line in &hunk.lines {
+        out.push_str(&line.content);
+        out.push('\n');
+    }
+    Some(out)
 }

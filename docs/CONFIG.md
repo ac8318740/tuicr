@@ -45,6 +45,8 @@ scroll_offset = 5
 no_update_check = false
 review_watch_interval_ms = 1000
 single_file_view = false
+file_viewer = "spechub-view"
+show_pr_info = true
 username = "user"
 diff_watch_interval_ms = 0
 
@@ -85,6 +87,8 @@ legend = true
 | `show_file_list`           | `true`       | Whether the file list panel is visible on startup. Toggle with `<leader>e`.                                                                                |
 | `show_file_line_stats`     | `true`       | Show per-file `+added -removed` line counts in the file list.                                                                                              |
 | `file_list_width`          | `20`         | Starting width of the file list, as a percentage of the content area. Clamped to 10-60. Adjust at runtime with `<leader>L` / `<leader>H`, which repeat on a bare `L` / `H`.                                   |
+| `file_viewer`              | `spechub-view` | Command `<leader>v` hands the focused file to, instead of `$EDITOR`. Split with shell-like quoting and run without a shell. Terminal viewers take over the screen and return on exit.                        |
+| `show_pr_info`             | `true`       | Whether the pull request overview renders above the first file. Toggle at runtime with `<leader>p`.                                                          |
 | `show_pr_checks`           | `false`      | Whether PR CI checks are fetched and shown. Set to `true` to include GitHub check rollups.                                                           |
 | `show_pr_comments`         | `true`       | Whether PR conversation comments are fetched and shown. Set to `false` to skip PR comments.                                                         |
 | `show_commits`             | `true`       | Whether the inline commit selector pane is visible on startup for multi-commit reviews. Toggle with `<leader>s` or `:set commits!`.                        |

@@ -23,6 +23,39 @@ impl App {
         self.set_message(format!("File list width {next}%"));
     }
 
+    /// The pull request overview to render, or `None` when there is none or
+    /// it is hidden.
+    ///
+    /// Three things have to agree on this — the annotation list, the rendered
+    /// lines, and the height the cursor arithmetic uses. Disagreement puts
+    /// the cursor on a different line from the one drawn, so they all ask
+    /// here rather than each testing the flag.
+    pub fn visible_pr_info(&self) -> Option<&crate::forge::traits::PullRequestInfo> {
+        if !self.show_pr_info {
+            return None;
+        }
+        self.pr_info.as_ref()
+    }
+
+    /// Show or hide the pull request overview above the first file.
+    ///
+    /// `<leader>f` narrows to one file but leaves the overview at the top, so
+    /// the view still opens on the PR rather than on the file. This is what
+    /// takes it away.
+    pub fn toggle_pr_info(&mut self) {
+        if self.pr_info.is_none() {
+            self.set_message("No pull request overview to toggle");
+            return;
+        }
+        self.show_pr_info = !self.show_pr_info;
+        self.rebuild_annotations();
+        self.set_message(if self.show_pr_info {
+            "PR overview shown"
+        } else {
+            "PR overview hidden"
+        });
+    }
+
     pub fn set_message(&mut self, msg: impl Into<String>) {
         self.set_message_inner(msg, MessageType::Info, Some(MESSAGE_TTL_INFO));
     }

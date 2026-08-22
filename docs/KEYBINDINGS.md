@@ -142,6 +142,8 @@ Shown below the file tree when local comments or visible remote PR threads exist
 | `i` | Edit comment at cursor (vim: text cursor at start) |
 | `A` | Edit comment at cursor with text cursor at end (vim mode only) |
 | `e` | Open focused file in `$EDITOR` |
+| `<leader>v` | Open focused file in the file viewer |
+| `<leader>p` | Show/hide the PR overview above the first file |
 | `y` | Copy review to clipboard |
 | `Y` | Copy the comment at cursor to clipboard |
 
@@ -150,6 +152,28 @@ take over the screen and tuicr reloads the diff once they exit. Windowed editors
 (`code`, `cursor`, `zed`, `subl`, …) open in their own window while tuicr stays on
 screen; reload with `:e` after editing. Adding `--wait` to `$EDITOR` opts a windowed
 editor back into the blocking behaviour.
+
+`<leader>v` opens the same file in `file_viewer` instead. It resolves the target
+exactly as `e` does — the file under the tree cursor, or the file the diff cursor
+is in — so it works from either panel, which a plain letter could not: the file
+tree already spends `e` on the exclude filter.
+
+The default viewer is `spechub-view`, a dispatcher that sends markdown to a
+renderer and everything else to `yazi`. Set `file_viewer` to any command that
+takes a path. Terminal viewers take over the screen and hand it back on `q`,
+the same way terminal editors do.
+
+A file the PR *adds* has no worktree file to open — the checkout is on some
+other commit — so `<leader>v` rebuilds it from the diff instead, which is exact
+because every line of an added file's diff is an addition. `e` deliberately does
+not: editing a throwaway copy would discard the edit. A *modified* file missing
+from the checkout is not rebuilt either, because its diff is hunks and context
+with the untouched remainder missing.
+
+`<leader>p` hides the pull request overview that renders above the first file.
+`<leader>f` narrows the diff to one file but leaves that overview in place, so
+the view still opens on the PR; `<leader>f` with `<leader>e` and `<leader>p`
+leaves one file's diff and nothing else. `show_pr_info = false` starts that way.
 
 ## Visual mode
 

@@ -323,3 +323,77 @@ fn should_not_treat_a_normal_diff_as_a_whole_file_view() {
 
     assert!(!app.is_whole_file_view());
 }
+
+/// The external viewer reuses the editor handoff wholesale: the same target
+/// resolution, the same terminal suspend/resume. Only the command differs,
+/// so the command is what these pin.
+///
+/// `app_with` roots the worktree at /tmp, so a real file there is what the
+/// path-exists guard in `queue_editor_for_file_idx` needs to let a target
+/// through.
+#[test]
+fn should_queue_the_configured_viewer_for_the_focused_file() {
+    let file = tempfile::NamedTempFile::new_in("/tmp").expect("temp file");
+    let name = file
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let mut app = app_with(&[&name]);
+    app.focused_panel = FocusedPanel::Diff;
+    app.file_viewer = "spechub-view".into();
+
+    app.queue_viewer_for_focused_item();
+
+    let (target, command) = app.take_pending_editor_target().expect("a queued target");
+    assert_eq!(target.path, file.path());
+    assert_eq!(command.as_deref(), Some("spechub-view"));
+}
+
+/// `e` must still mean `$EDITOR` after a viewer open that resolved to nothing.
+/// Setting the command before the target is resolved would leave it behind on
+/// every warning path, and the next `e` would silently run the viewer.
+#[test]
+fn should_not_leave_a_stale_viewer_command_when_nothing_could_be_queued() {
+    let mut app = app_with(&["does-not-exist-on-disk.rs"]);
+    app.focused_panel = FocusedPanel::Diff;
+    app.file_viewer = "spechub-view".into();
+
+    app.queue_viewer_for_focused_item();
+
+    assert!(
+        app.take_pending_editor_target().is_none(),
+        "a missing file must queue nothing"
+    );
+    assert!(
+        app.pending_editor_command.is_none(),
+        "a failed viewer open must not arm the viewer for the next editor open"
+    );
+}
+
+/// The editor path is the default, so queueing it must clear any command an
+/// earlier viewer open left armed.
+#[test]
+fn should_fall_back_to_the_environment_editor_after_a_viewer_open() {
+    let file = tempfile::NamedTempFile::new_in("/tmp").expect("temp file");
+    let name = file
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let mut app = app_with(&[&name]);
+    app.focused_panel = FocusedPanel::Diff;
+    app.file_viewer = "spechub-view".into();
+
+    app.queue_viewer_for_focused_item();
+    app.take_pending_editor_target();
+    app.queue_editor_for_focused_item();
+
+    let (_, command) = app.take_pending_editor_target().expect("a queued target");
+    assert_eq!(
+        command, None,
+        "the editor path means $EDITOR, not the viewer"
+    );
+}

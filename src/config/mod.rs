@@ -111,6 +111,13 @@ pub struct AppConfig {
     /// area. Clamped to 10-60. Defaults to 20; `<leader>L` / `<leader>H`
     /// adjust at runtime.
     pub file_list_width: Option<usize>,
+    /// Command that `<leader>v` hands the focused file to, instead of
+    /// `$EDITOR`. Split with shell-like quoting and run without a shell, the
+    /// same way `$EDITOR` is.
+    pub file_viewer: Option<String>,
+    /// Whether the pull request overview renders above the first file.
+    /// Toggle at runtime with `<leader>p`.
+    pub show_pr_info: Option<bool>,
     /// Whether pull-request CI checks are fetched and shown.
     /// Defaults to false.
     pub show_pr_checks: Option<bool>,
@@ -197,6 +204,8 @@ const KNOWN_KEYS: &[&str] = &[
     "show_file_list",
     "show_file_line_stats",
     "file_list_width",
+    "file_viewer",
+    "show_pr_info",
     "show_pr_checks",
     "show_pr_comments",
     "show_commits",
@@ -424,6 +433,8 @@ fn load_config_from_path(path: &Path) -> Result<ConfigLoadOutcome> {
         show_file_list: read_bool(table, "show_file_list", &mut warnings),
         show_file_line_stats: read_bool(table, "show_file_line_stats", &mut warnings),
         file_list_width: read_usize(table, "file_list_width", &mut warnings),
+        file_viewer: read_string(table, "file_viewer", &mut warnings),
+        show_pr_info: read_bool(table, "show_pr_info", &mut warnings),
         show_pr_checks: read_bool(table, "show_pr_checks", &mut warnings),
         show_pr_comments: read_bool(table, "show_pr_comments", &mut warnings),
         show_commits: read_bool(table, "show_commits", &mut warnings),
@@ -1030,6 +1041,29 @@ mod tests {
             None
         );
         assert_eq!(outcome.warnings.len(), 1);
+    }
+
+    #[test]
+    fn should_parse_show_pr_info() {
+        let outcome = parse_config("show_pr_info = false\n");
+        assert_eq!(
+            outcome.config.as_ref().and_then(|cfg| cfg.show_pr_info),
+            Some(false)
+        );
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
+    }
+
+    #[test]
+    fn should_parse_file_viewer() {
+        let outcome = parse_config("file_viewer = \"spechub-view\"\n");
+        assert_eq!(
+            outcome
+                .config
+                .as_ref()
+                .and_then(|cfg| cfg.file_viewer.clone()),
+            Some("spechub-view".to_string())
+        );
+        assert!(outcome.warnings.is_empty(), "{:?}", outcome.warnings);
     }
 
     // file_list_width

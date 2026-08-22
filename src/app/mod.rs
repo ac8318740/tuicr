@@ -37,6 +37,10 @@ pub const UNSTAGED_SELECTION_ID: &str = "__tuicr_unstaged__";
 pub const GAP_EXPAND_BATCH: usize = 20;
 /// File list width as a percentage of the content area: starting value,
 /// step per `H` / `L` press, and the bounds that keep both panes usable.
+/// What `<leader>v` runs when no `file_viewer` is configured. A dispatcher
+/// rather than a file manager directly, so which viewer suits which file type
+/// stays a shell decision instead of a rebuild.
+pub const FILE_VIEWER_DEFAULT: &str = "spechub-view";
 pub const FILE_LIST_WIDTH_DEFAULT: u16 = 20;
 pub const FILE_LIST_WIDTH_STEP: u16 = 5;
 pub const FILE_LIST_WIDTH_MIN: u16 = 10;
@@ -1120,6 +1124,18 @@ pub struct App {
     pub diff_files: Vec<DiffFile>,
     pub diff_source: DiffSource,
     pub pending_editor_target: Option<EditorTarget>,
+    /// Command to run the queued target with. `None` means `$EDITOR`, which
+    /// is the `e` path; `Some` is the `<leader>v` viewer path. Armed only
+    /// once a target has actually resolved, so a warning cannot leave the
+    /// viewer hanging over the next `e`.
+    pub pending_editor_command: Option<String>,
+    /// Command `<leader>v` hands the focused file to. From `file_viewer` in
+    /// the config, defaulting to [`FILE_VIEWER_DEFAULT`].
+    pub file_viewer: String,
+    /// Scratch directory for files reconstructed from a diff, for the cases
+    /// where no worktree file exists to open. Held for the session so the
+    /// viewer still has something to read, and removed when it drops.
+    pub(crate) reconstructed_files: Option<tempfile::TempDir>,
     /// Windowed editors that have not exited yet; polled by
     /// `poll_editor_launches`.
     pub(crate) editor_launches: Vec<EditorLaunch>,
@@ -1284,6 +1300,10 @@ pub struct App {
     pub current_pr_head: Option<String>,
     /// Extended PR metadata rendered at the top of the diff view. Populated in PR mode.
     pub pr_info: Option<crate::forge::traits::PullRequestInfo>,
+    /// Whether the pull request overview renders above the first file.
+    /// Toggled with `<leader>p`; `show_pr_info` in the config sets the
+    /// starting value.
+    pub show_pr_info: bool,
     /// Whether pull-request CI checks are fetched and rendered. Defaults to
     /// false; configured before the first direct PR load.
     pub show_pr_checks: bool,

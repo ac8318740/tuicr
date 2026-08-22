@@ -29,8 +29,7 @@ pub(crate) fn pr_info_content_width(viewport_width: usize) -> usize {
 }
 
 pub fn pr_info_render_height(app: &App) -> usize {
-    app.pr_info
-        .as_ref()
+    app.visible_pr_info()
         .map(|info| {
             build_pr_info_lines(
                 info,
@@ -73,7 +72,7 @@ pub fn append_pr_info_section(
     line_idx: &mut usize,
     current_line_idx: usize,
 ) {
-    let Some(info) = app.pr_info.as_ref() else {
+    let Some(info) = app.visible_pr_info() else {
         return;
     };
 

@@ -213,3 +213,51 @@ fn should_keep_pr_info_annotations_in_sync_with_rendered_lines_at_wrap_boundary(
         "PrInfoLine annotation count must equal the rendered PR-info line count"
     );
 }
+
+/// The PR overview sits above the first file, so `<leader>f` alone still
+/// opens on it rather than on the file. Hiding it is what makes single-file
+/// view actually show a single file.
+///
+/// Three places have to agree the overview is gone - the annotation list, the
+/// rendered lines, and the height the cursor maths uses - so all three are
+/// asserted rather than just the flag.
+#[test]
+fn should_hide_the_pr_overview_when_toggled_off() {
+    let mut app = build_pr_app();
+    assert!(
+        crate::ui::pr_info_panel::pr_info_render_height(&app) > 0,
+        "the overview must be showing before it can be hidden"
+    );
+
+    app.toggle_pr_info();
+    app.rebuild_annotations();
+
+    assert_eq!(crate::ui::pr_info_panel::pr_info_render_height(&app), 0);
+    assert!(
+        !app.line_annotations
+            .iter()
+            .any(|a| matches!(a, crate::app::AnnotatedLine::PrInfoLine { .. })),
+        "no overview line may remain in the annotation list"
+    );
+}
+
+#[test]
+fn should_bring_the_pr_overview_back_when_toggled_on_again() {
+    let mut app = build_pr_app();
+    let height = crate::ui::pr_info_panel::pr_info_render_height(&app);
+
+    app.toggle_pr_info();
+    app.toggle_pr_info();
+    app.rebuild_annotations();
+
+    assert_eq!(
+        crate::ui::pr_info_panel::pr_info_render_height(&app),
+        height
+    );
+    assert!(
+        app.line_annotations
+            .iter()
+            .any(|a| matches!(a, crate::app::AnnotatedLine::PrInfoLine { .. })),
+        "the overview must come back exactly as it was"
+    );
+}
