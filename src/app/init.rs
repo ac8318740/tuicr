@@ -914,14 +914,7 @@ impl App {
 
         let pr_source = PullRequestDiffSource::from_details(&opened.details);
         let diff_source = DiffSource::PullRequest(Box::new(pr_source));
-        let vcs_info = VcsInfo {
-            root_path: opened.session.repo_path.clone(),
-            head_commit: opened.details.head_sha.clone(),
-            branch_name: Some(opened.details.head_ref_name.clone()),
-            vcs_type: VcsType::File,
-        };
-        // FileBackend acts as a no-op VCS placeholder; PR context expansion
-        // routes through the forge backend, not the VCS box.
+        let vcs_info = super::pr::pr_vcs_info(&opened.session, &opened.details);
         let vcs: Box<dyn VcsBackend> = Box::new(PrNoopVcs::new(vcs_info.clone()));
 
         // Snapshot the PR details before consuming `opened` so we can kick

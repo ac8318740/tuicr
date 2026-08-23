@@ -13,6 +13,11 @@ pub enum VcsType {
     Mercurial,
     Jujutsu,
     File,
+    /// Placeholder for pull-request sessions, which have no local VCS
+    /// backend: the diff comes from the forge and the `VcsBackend` slot is
+    /// filled by `PrNoopVcs`. Distinct from `File` so that PR reviews are
+    /// not mistaken for `--file` whole-file views.
+    PullRequest,
 }
 
 impl std::fmt::Display for VcsType {
@@ -22,6 +27,7 @@ impl std::fmt::Display for VcsType {
             VcsType::Mercurial => write!(f, "hg"),
             VcsType::Jujutsu => write!(f, "jj"),
             VcsType::File => write!(f, "file"),
+            VcsType::PullRequest => write!(f, "pr"),
         }
     }
 }
@@ -299,6 +305,11 @@ mod tests {
     #[test]
     fn vcs_type_display_jujutsu() {
         assert_eq!(format!("{}", VcsType::Jujutsu), "jj");
+    }
+
+    #[test]
+    fn vcs_type_display_pull_request() {
+        assert_eq!(format!("{}", VcsType::PullRequest), "pr");
     }
 
     #[test]

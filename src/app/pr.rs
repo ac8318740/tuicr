@@ -24,14 +24,8 @@ impl App {
 
         let pr_source = PullRequestDiffSource::from_details(&details);
         let read_only_reason = pr_source.read_only_reason();
-        let virtual_root = session.repo_path.clone();
 
-        self.vcs_info = VcsInfo {
-            root_path: virtual_root.clone(),
-            head_commit: details.head_sha.clone(),
-            branch_name: Some(details.head_ref_name.clone()),
-            vcs_type: VcsType::File,
-        };
+        self.vcs_info = pr_vcs_info(&session, &details);
         self.vcs = Box::new(PrNoopVcs::new(self.vcs_info.clone()));
         self.session = session;
         self.diff_files = diff_files;
@@ -50,6 +44,8 @@ impl App {
         self.current_pr_head = Some(details.head_sha.clone());
         self.input_mode = InputMode::Normal;
         self.focused_panel = FocusedPanel::Diff;
+        // A PR is a real diff; a prior --all-files whole-file flag must not persist.
+        self.is_pristine_mode = false;
         self.clear_expanded_gaps();
         self.commit_list.clear();
         self.commit_selection_range = None;
@@ -1308,5 +1304,25 @@ impl App {
 
     pub fn pr_filter_editing(&self) -> bool {
         self.pr_filter_draft.is_some()
+    }
+}
+
+/// The `VcsInfo` a PR-mode session runs on: the PR's virtual root, its head
+/// SHA and its head branch.
+///
+/// `PrNoopVcs` acts as a no-op VCS placeholder; PR context expansion routes
+/// through the forge backend, not the VCS box. The session carries
+/// `VcsType::PullRequest` rather than `VcsType::File` so it is not mistaken
+/// for a `--file` whole-file view, which would suppress the per-file
+/// `+N -N` stats a PR review still needs.
+pub(crate) fn pr_vcs_info(
+    session: &ReviewSession,
+    details: &crate::forge::traits::PullRequestDetails,
+) -> VcsInfo {
+    VcsInfo {
+        root_path: session.repo_path.clone(),
+        head_commit: details.head_sha.clone(),
+        branch_name: Some(details.head_ref_name.clone()),
+        vcs_type: VcsType::PullRequest,
     }
 }

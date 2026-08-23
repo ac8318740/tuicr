@@ -106,4 +106,10 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    // The `VcsType` a PR session ends up with is decided by the PR entry
+    // points, not by this backend — `PrNoopVcs` only echoes back whatever
+    // `VcsInfo` it is handed. Asserting on a `VcsInfo` constructed here
+    // would test the test. That guarantee is pinned where it is decided,
+    // in `app::tests::pr_entry_tests`, by driving `enter_pr_diff_mode`.
 }

@@ -324,6 +324,22 @@ fn should_not_treat_a_normal_diff_as_a_whole_file_view() {
     assert!(!app.is_whole_file_view());
 }
 
+/// A PR review is a real diff against a base branch, so unlike
+/// `--all-files` and `--file` it must keep its per-file `+N -N` stats.
+/// This pins the classifier alone: `VcsType::PullRequest` is not one of the
+/// whole-file types. It cannot tell you that a PR session actually reaches
+/// that type — it assigns the type itself — so it would still pass if the
+/// PR entry points went back to `VcsType::File`. That half is pinned in
+/// `app::tests::pr_entry_tests`, which drives `enter_pr_diff_mode`.
+#[test]
+fn should_not_treat_a_pr_placeholder_vcs_as_a_whole_file_view() {
+    let mut app = app_with(&["a.rs"]);
+    app.is_pristine_mode = false;
+    app.vcs_info.vcs_type = VcsType::PullRequest;
+
+    assert!(!app.is_whole_file_view());
+}
+
 /// The external viewer reuses the editor handoff wholesale: the same target
 /// resolution, the same terminal suspend/resume. Only the command differs,
 /// so the command is what these pin.
