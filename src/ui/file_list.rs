@@ -18,6 +18,7 @@ const UNREVIEWED_BOX: &str = "\u{25a2}"; // ▢
 
 pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focused_panel == FocusedPanel::FileList;
+    let show_file_line_stats = app.show_file_line_stats && !app.is_whole_file_view();
 
     let mut title = format!(
         " Files \u{00b7} {}/{} ",
@@ -32,8 +33,33 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
             app.unfiltered_file_count()
         ));
     }
+    let mut title_line = Line::from(title.clone());
+    if show_file_line_stats {
+        let (_, additions, deletions) = app.diff_stat();
+        let stats = Line::from(vec![
+            Span::raw("· "),
+            Span::styled(
+                format!("+{additions}"),
+                Style::default().fg(app.theme.diff_add),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                format!("-{deletions} "),
+                Style::default().fg(app.theme.diff_del),
+            ),
+        ]);
+        let available = area.width.saturating_sub(2) as usize;
+        // Drop the label before dropping totals; never show a clipped count.
+        if title.width() + stats.width() > available {
+            title = title.replacen(" Files · ", " ", 1);
+        }
+        if title.width() + stats.width() <= available {
+            title_line = Line::from(title);
+            title_line.spans.extend(stats.spans);
+        }
+    }
     let mut block = Block::default()
-        .title(title)
+        .title(title_line)
         .borders(Borders::ALL)
         .style(styles::panel_style(&app.theme))
         .border_style(styles::border_style(&app.theme, focused));
@@ -60,7 +86,7 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("?");
-                depth * 2 + 4 + filename.width() + file_stat_width(file, app.show_file_line_stats)
+                depth * 2 + 4 + filename.width() + file_stat_width(file, show_file_line_stats)
             }
         })
         .max()
@@ -155,7 +181,7 @@ pub(super) fn render_file_list(frame: &mut Frame, app: &mut App, area: Rect) {
                             ));
                         }
                         spans.push(Span::raw(filename.to_string()));
-                        spans.extend(file_stat_spans(file, &app.theme, app.show_file_line_stats));
+                        spans.extend(file_stat_spans(file, &app.theme, show_file_line_stats));
                         Line::from(spans)
                     }
                 }
@@ -225,6 +251,9 @@ fn file_stat_width(file: &crate::model::DiffFile, show_file_line_stats: bool) ->
     }
 
     let (additions, deletions) = file.stat();
+    if additions == 0 && deletions == 0 {
+        return 0;
+    }
     format!(" +{additions} -{deletions}").width()
 }
 
@@ -234,11 +263,14 @@ fn file_stat_spans(
     theme: &crate::theme::Theme,
     show_file_line_stats: bool,
 ) -> Vec<Span<'static>> {
-    if !show_file_line_stats || file.is_commit_message {
+    if !show_file_line_stats {
         return Vec::new();
     }
 
     let (additions, deletions) = file.stat();
+    if additions == 0 && deletions == 0 {
+        return Vec::new();
+    }
     vec![
         Span::raw(" "),
         Span::styled(format!("+{additions}"), Style::default().fg(theme.diff_add)),
@@ -485,8 +517,7 @@ mod tests {
         assert!(text.contains("long_directory/"), "{text}");
     }
 
-    #[test]
-    fn should_render_colored_added_and_removed_line_counts_for_each_file() {
+    fn app_with_line_stats() -> App {
         let mut app = app_with(&["src/main.rs"]);
         app.diff_files[0].hunks = vec![DiffHunk {
             header: "@@ -1,1 +1,2 @@".into(),
@@ -494,6 +525,7 @@ mod tests {
                 DiffLine {
                     origin: LineOrigin::Deletion,
                     content: "old".into(),
+                    raw_content: None,
                     old_lineno: Some(1),
                     new_lineno: None,
                     highlighted_spans: None,
@@ -501,6 +533,7 @@ mod tests {
                 DiffLine {
                     origin: LineOrigin::Addition,
                     content: "new".into(),
+                    raw_content: None,
                     old_lineno: None,
                     new_lineno: Some(1),
                     highlighted_spans: None,
@@ -508,6 +541,7 @@ mod tests {
                 DiffLine {
                     origin: LineOrigin::Addition,
                     content: "another new line".into(),
+                    raw_content: None,
                     old_lineno: None,
                     new_lineno: Some(2),
                     highlighted_spans: None,
@@ -519,6 +553,12 @@ mod tests {
             new_count: 2,
         }];
 
+        app
+    }
+
+    #[test]
+    fn should_render_colored_added_and_removed_line_counts_for_each_file() {
+        let mut app = app_with_line_stats();
         let spans = super::file_stat_spans(&app.diff_files[0], &app.theme, true);
         assert_eq!(spans[1].content, "+2");
         assert_eq!(spans[1].style.fg, Some(app.theme.diff_add));
@@ -537,6 +577,147 @@ mod tests {
             !text.contains("main.rs +2 -1"),
             "expected file line counts to be hidden, got:\n{text}"
         );
+    }
+
+    fn draw_tree_header(app: &mut App, width: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, 4)).unwrap();
+        terminal
+            .draw(|frame| super::render_file_list(frame, app, frame.area()))
+            .unwrap();
+        buffer_text(terminal.backend().buffer())
+            .lines()
+            .next()
+            .unwrap()
+            .to_string()
+    }
+
+    #[test]
+    fn should_show_displayed_totals_in_the_tree_header_while_inside_a_file() {
+        let mut app = app_with(&["a.rs", "b.rs"]);
+        let hunks = app_with_line_stats().diff_files[0].hunks.clone();
+        for file in &mut app.diff_files {
+            file.hunks = hunks.clone();
+        }
+        assert!(!app.is_cursor_in_overview());
+        let header = draw_tree_header(&mut app, 60);
+        assert!(header.contains("Files · 0/2 · +4 -2"), "{header}");
+
+        app.begin_file_tree_prompt(FileTreePrompt::Include);
+        app.file_tree_prompt_insert_char('a');
+        app.commit_file_tree_prompt();
+        let header = draw_tree_header(&mut app, 60);
+        assert!(header.contains("Files · 0/1 · 1 of 2 · +2 -1"), "{header}");
+    }
+
+    #[test]
+    fn should_compact_header_totals_before_omitting_them_on_narrow_panes() {
+        let mut app = app_with_line_stats();
+        let header = draw_tree_header(&mut app, 24);
+        assert!(header.contains("Files · 0/1 · +2 -1"), "{header}");
+        let header = draw_tree_header(&mut app, 18);
+        assert!(header.contains("0/1 · +2 -1"), "{header}");
+        assert!(!header.contains("Files"), "{header}");
+        let header = draw_tree_header(&mut app, 14);
+        assert!(header.contains("Files · 0/1"), "{header}");
+        assert!(!header.contains('+'), "{header}");
+    }
+
+    #[test]
+    fn should_hide_header_totals_when_disabled_or_in_a_whole_file_view() {
+        let mut app = app_with_line_stats();
+        app.show_file_line_stats = false;
+        assert!(!draw_tree_header(&mut app, 60).contains('+'));
+        app.show_file_line_stats = true;
+        app.is_pristine_mode = true;
+        assert!(!draw_tree_header(&mut app, 60).contains('+'));
+        app.is_pristine_mode = false;
+        app.vcs_info.vcs_type = VcsType::File;
+        assert!(!draw_tree_header(&mut app, 60).contains('+'));
+    }
+
+    #[test]
+    fn should_hide_line_stats_in_whole_file_modes_without_reserving_width() {
+        for (pristine, vcs_type) in [
+            (false, VcsType::File),
+            (true, VcsType::File),
+            (true, VcsType::Git),
+        ] {
+            let mut app = app_with_line_stats();
+            app.is_pristine_mode = pristine;
+            app.vcs_info.vcs_type = vcs_type;
+            assert!(app.is_whole_file_view());
+            if pristine {
+                for line in &mut app.diff_files[0].hunks[0].lines {
+                    line.origin = LineOrigin::Context;
+                }
+            } else {
+                for line in &mut app.diff_files[0].hunks[0].lines {
+                    line.origin = LineOrigin::Addition;
+                }
+            }
+            let text = buffer_text(&draw(&mut app));
+            assert!(!text.contains("main.rs +"), "{text}");
+            let width = app.file_list_state.max_content_width;
+            app.show_file_line_stats = false;
+            draw(&mut app);
+            assert_eq!(width, app.file_list_state.max_content_width);
+        }
+    }
+
+    #[test]
+    fn should_keep_line_stats_for_pr_reviews_using_the_file_vcs_type() {
+        use crate::app::PullRequestDiffSource;
+        use crate::forge::traits::{ForgeRepository, PrSessionKey};
+        let mut app = app_with_line_stats();
+        app.vcs_info.vcs_type = VcsType::File;
+        app.diff_source = DiffSource::PullRequest(Box::new(PullRequestDiffSource {
+            key: PrSessionKey::new(
+                ForgeRepository::github("github.com", "agavra", "tuicr"),
+                607,
+                "head",
+            ),
+            base_sha: "base".into(),
+            title: "Line stats".into(),
+            url: "https://github.com/agavra/tuicr/pull/607".into(),
+            head_ref_name: "file-line-stats".into(),
+            base_ref_name: "main".into(),
+            state: "OPEN".into(),
+            closed: false,
+            merged: false,
+        }));
+        let text = buffer_text(&draw(&mut app));
+        assert!(text.contains("main.rs +2 -1"), "{text}");
+    }
+
+    #[test]
+    fn should_hide_zero_line_stats_for_renames_and_other_empty_diffs() {
+        let mut file = file("renamed.rs");
+        let theme = crate::theme::Theme::dark();
+        for status in [FileStatus::Renamed, FileStatus::Modified] {
+            file.status = status;
+            assert!(super::file_stat_spans(&file, &theme, true).is_empty());
+            assert_eq!(super::file_stat_width(&file, true), 0);
+        }
+    }
+
+    #[test]
+    fn should_measure_only_visible_line_stats() {
+        let mut app = app_with_line_stats();
+        let spans = super::file_stat_spans(&app.diff_files[0], &app.theme, true);
+        assert_eq!(
+            super::file_stat_width(&app.diff_files[0], true),
+            spans.iter().map(|span| span.width()).sum::<usize>()
+        );
+        draw(&mut app);
+        let with_stats = app.file_list_state.max_content_width;
+        app.show_file_line_stats = false;
+        draw(&mut app);
+        assert_eq!(with_stats - app.file_list_state.max_content_width, 6);
+        app.diff_files[0].is_commit_message = true;
+        assert_eq!(super::file_stat_width(&app.diff_files[0], true), 0);
+        app.show_file_line_stats = true;
+        let text = buffer_text(&draw(&mut app));
+        assert!(!text.contains("main.rs +2 -1"), "{text}");
     }
 
     #[test]

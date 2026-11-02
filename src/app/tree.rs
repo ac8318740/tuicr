@@ -1,6 +1,13 @@
 use super::*;
 
 impl App {
+    /// Whole-file reviews have no before/after comparison. PRs also use File VCS.
+    pub fn is_whole_file_view(&self) -> bool {
+        self.is_pristine_mode
+            || (self.vcs_info.vcs_type == VcsType::File
+                && !matches!(self.diff_source, DiffSource::PullRequest(_)))
+    }
+
     pub fn set_compact_folders(&mut self, enabled: bool) {
         self.compact_folders = enabled;
         self.ensure_valid_tree_selection();
