@@ -30,7 +30,7 @@ impl Key {
                 | KeyModifiers::ALT
                 | KeyModifiers::SUPER);
         let code = match code {
-            KeyCode::Char(c) if c.is_ascii_uppercase() => {
+            KeyCode::Char(c) if c.is_uppercase() => {
                 modifiers.insert(KeyModifiers::SHIFT);
                 code
             }
@@ -343,6 +343,11 @@ impl Typeahead {
         !self.mappings.is_empty()
     }
 
+    pub fn interrupt(&mut self) {
+        self.entries.clear();
+        self.last_key_at = None;
+    }
+
     pub fn push(&mut self, event: Event, now: Instant) {
         match event {
             Event::Key(key) if key.kind == KeyEventKind::Release => self.release(key),
@@ -511,6 +516,57 @@ mod tests {
 
     fn warnings_for(source: &str) -> Vec<String> {
         parse(source, LEADER).1
+    }
+
+    #[test]
+    fn should_match_non_ascii_uppercase_with_or_without_shift() {
+        for modifiers in [KeyModifiers::NONE, KeyModifiers::SHIFT] {
+            let mut input = typeahead("nnoremap Г j\nnnoremap г k");
+            let now = Instant::now();
+            type_keys(
+                &mut input,
+                &[KeyEvent::new(KeyCode::Char('Г'), modifiers)],
+                now,
+            );
+            assert_eq!(drain(&mut input, MapMode::Normal, now), keys(&[plain('j')]));
+            type_keys(&mut input, &[plain('г')], now);
+            assert_eq!(drain(&mut input, MapMode::Normal, now), keys(&[plain('k')]));
+        }
+    }
+
+    #[test]
+    fn should_discard_pending_mapping_keys_on_interrupt() {
+        let mut input = typeahead("nnoremap xx j");
+        let now = Instant::now();
+        type_keys(&mut input, &[plain('x')], now);
+        assert_eq!(input.pop(Some(MapMode::Normal), now), None);
+        input.interrupt();
+        assert_eq!(
+            input.pop(Some(MapMode::Normal), now + MAPPING_TIMEOUT),
+            None
+        );
+        type_keys(&mut input, &[plain('x'), plain('x')], now);
+        assert_eq!(drain(&mut input, MapMode::Normal, now), keys(&[plain('j')]));
+    }
+
+    #[test]
+    fn should_not_remap_the_key_after_a_builtin_prefix() {
+        for prefix in ['z', 'Z', 'd', LEADER] {
+            let mut input = typeahead("nnoremap x j\nnnoremap xx k");
+            let now = Instant::now();
+            type_keys(&mut input, &[plain(prefix), plain('x')], now);
+            assert_eq!(
+                input.pop(Some(MapMode::Normal), now),
+                Some(Event::Key(plain(prefix)))
+            );
+            assert_eq!(input.pop(None, now), Some(Event::Key(plain('x'))));
+            assert_eq!(input.pop(Some(MapMode::Normal), now), None);
+            type_keys(&mut input, &[plain('x')], now);
+            assert_eq!(
+                drain(&mut input, MapMode::Normal, now + MAPPING_TIMEOUT),
+                keys(&[plain('j')])
+            );
+        }
     }
 
     #[test]

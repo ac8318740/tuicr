@@ -52,6 +52,14 @@ fn event_drain_timeout(drained: usize) -> Option<Duration> {
     }
 }
 
+fn is_ctrl_c(key: crossterm::event::KeyEvent) -> bool {
+    matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        && key.code == crossterm::event::KeyCode::Char('c')
+        && key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL)
+}
+
 fn should_probe_keyboard_enhancement(output_to_stdout: bool, stdin_is_terminal: bool) -> bool {
     !output_to_stdout && stdin_is_terminal
 }
@@ -513,7 +521,10 @@ fn main() -> anyhow::Result<()> {
                     }
                     drained += 1;
                     let event = event::read()?;
-                    if typeahead.is_active() {
+                    if matches!(&event, Event::Key(key) if is_ctrl_c(*key)) {
+                        // The universal exit must bypass mappings, including a pending sequence.
+                        typeahead.interrupt();
+                    } else if typeahead.is_active() {
                         typeahead.push(event, Instant::now());
                         continue;
                     }
@@ -553,11 +564,7 @@ fn main() -> anyhow::Result<()> {
                 {
                     // Handle Ctrl+C twice to exit (works across all input modes)
                     // In Comment mode, first Ctrl+C also cancels the comment
-                    if key.code == crossterm::event::KeyCode::Char('c')
-                        && key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL)
-                    {
+                    if is_ctrl_c(key) {
                         // If in comment mode, cancel the comment first
                         if app.input_mode == InputMode::Comment {
                             app.exit_comment_mode();
@@ -1077,6 +1084,32 @@ fn run_editor_from_tui<W: Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_ctrl_c_presses_and_repeats_but_not_releases() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        for kind in [KeyEventKind::Press, KeyEventKind::Repeat] {
+            assert!(is_ctrl_c(KeyEvent::new_with_kind(
+                KeyCode::Char('c'),
+                KeyModifiers::CONTROL,
+                kind,
+            )));
+        }
+        assert!(!is_ctrl_c(KeyEvent::new_with_kind(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+            KeyEventKind::Release,
+        )));
+        assert!(!is_ctrl_c(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::NONE
+        )));
+        assert!(!is_ctrl_c(KeyEvent::new(
+            KeyCode::Char('x'),
+            KeyModifiers::CONTROL
+        )));
+    }
 
     #[test]
     fn drain_blocks_once_then_takes_only_queued_events() {

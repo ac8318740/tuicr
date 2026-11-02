@@ -4,6 +4,10 @@ Full reference. Press `?` inside tuicr for an in-app version of this list.
 
 `<leader>` defaults to `;`. Override it with `leader = ","` in `~/.config/tuicr/config.toml`.
 
+For custom bindings, put Vim-style non-recursive mappings in `mappings.vim` next to
+`config.toml`. See [Key mappings](CONFIG.md#key-mappings) for modes, notation, and
+examples. Raw `Ctrl-c` remains available for the double-`Ctrl-c` exit.
+
 ## Navigation
 
 | Key | Action |

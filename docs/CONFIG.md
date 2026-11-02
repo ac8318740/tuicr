@@ -213,7 +213,8 @@ and fall back through normal precedence.
 ## Key mappings
 
 Remap keys with Vim's non-recursive mapping commands in `mappings.vim`, next to
-`config.toml` (default: `~/.config/tuicr/mappings.vim`):
+`config.toml`: `$XDG_CONFIG_HOME/tuicr/mappings.vim` on Unix (default:
+`~/.config/tuicr/mappings.vim`) or `%APPDATA%\tuicr\mappings.vim` on Windows.
 
 ```vim
 " Move between panels with Ctrl+h/j/k/l
@@ -249,6 +250,8 @@ commands (`map`, `nmap`, …) are rejected with a startup warning.
   the next key, like Vim's `timeoutlen`. Prefix the mapping with `<nowait>` to skip the wait.
   `<silent>` and `<unique>` are accepted and ignored.
 - Keys typed right after a pending built-in prefix (`z`, `Z`, `d`, `<leader>`) are not remapped.
+- Raw `Ctrl-c` always bypasses mappings and clears pending mapping keys, preserving the
+  double-`Ctrl-c` exit even when `<C-c>` is mapped to `<Nop>`.
 - Lines starting with `"` are comments. A later mapping for the same keys and mode replaces the
   earlier one. Invalid lines are skipped with a startup warning naming the line.
 
